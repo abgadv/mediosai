@@ -1,29 +1,65 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
+// 👇 نجبر Vercel يستخدم Node.js عشان process.env يشتغل
+export const config = {
+  runtime: "nodejs",
+};
 
-export default async function handler(
-  req: VercelRequest,
-  res: VercelResponse
-) {
+export default async function handler(req: Request): Promise<Response> {
+  // السماح بـ POST بس
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+    return new Response(
+      JSON.stringify({ error: "Method not allowed" }),
+      { status: 405 }
+    );
+  }
+
+  // 🔐 تحقق إن الـ API Key موجود
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) {
+    return new Response(
+      JSON.stringify({
+        error: "API Configuration Error: Key Missing",
+      }),
+      { status: 500 }
+    );
   }
 
   try {
-    const response = await fetch(
+    // قراءة الـ body
+    const body = await req.json();
+
+    // طلب الـ AI
+    const aiResponse = await fetch(
       "https://api.openai.com/v1/chat/completions",
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${process.env.AI_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(req.body),
+        body: JSON.stringify({
+          model: body.model || "gpt-4.1-mini",
+          messages: body.messages,
+          temperature: body.temperature ?? 0.7,
+        }),
       }
     );
 
-    const data = await response.json();
-    res.status(200).json(data);
-  } catch (err) {
-    res.status(500).json({ error: "AI request failed" });
+    const data = await aiResponse.json();
+
+    // رجوع الرد للـ Frontend
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  } catch (error) {
+    return new Response(
+      JSON.stringify({
+        error: "AI request failed",
+        details: String(error),
+      }),
+      { status: 500 }
+    );
   }
 }
