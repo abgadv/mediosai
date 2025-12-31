@@ -59,6 +59,9 @@ const AIChat: React.FC<AIChatProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const processedQueryRef = useRef<string | null>(null);
 
+  // 🔒 LOCK حقيقي يمنع أي تداخل
+  const sendingRef = useRef(false);
+
   const todayDate = new Date().toISOString().split("T")[0];
 
   /* ================= EFFECTS ================= */
@@ -67,6 +70,8 @@ const AIChat: React.FC<AIChatProps> = ({
     if (!systemUser) {
       setMessages([]);
       processedQueryRef.current = null;
+      sendingRef.current = false;
+      setIsTyping(false);
     }
   }, [systemUser]);
 
@@ -87,7 +92,12 @@ const AIChat: React.FC<AIChatProps> = ({
   }, [messages, isTyping]);
 
   useEffect(() => {
-    if (isOpen && initialQuery && initialQuery !== processedQueryRef.current) {
+    if (
+      isOpen &&
+      initialQuery &&
+      initialQuery !== processedQueryRef.current &&
+      !sendingRef.current
+    ) {
       processedQueryRef.current = initialQuery;
       handleSend(initialQuery);
       onClearQuery?.();
@@ -97,42 +107,59 @@ const AIChat: React.FC<AIChatProps> = ({
   /* ================= API CALL ================= */
 
   const callAura = async (text: string) => {
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        messages: [{ role: "user", content: text }],
-        meta: {
-          doctorStatus,
-          moderators,
-          appointmentsCount: appointments.length,
-          balance: transactions.reduce(
-            (acc, t) => acc + (t.type === "income" ? t.amount : -t.amount),
-            0
-          ),
-          user: systemUser,
-          date: todayDate,
-        },
-      }),
-    });
+    const controller = new AbortController();
 
-    const data = await res.json();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, 15000); // 15s hard stop
 
-    if (!res.ok) {
-      throw new Error(data.error || "AI request failed");
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          messages: [{ role: "user", content: text }],
+          meta: {
+            doctorStatus,
+            moderators,
+            appointmentsCount: appointments.length,
+            balance: transactions.reduce(
+              (acc, t) => acc + (t.type === "income" ? t.amount : -t.amount),
+              0
+            ),
+            user: systemUser,
+            date: todayDate,
+          },
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "AI request failed");
+      }
+
+      return (
+        data.choices?.[0]?.message?.content ||
+        data.text ||
+        "No response"
+      );
+    } finally {
+      clearTimeout(timeout);
     }
-
-    return (
-      data.choices?.[0]?.message?.content ||
-      data.text ||
-      "No response"
-    );
   };
 
   /* ================= SEND ================= */
 
   const handleSend = async (text: string) => {
-    if (!text.trim() || isTyping) return;
+    if (!text.trim()) return;
+
+    // 🔒 منع أي إرسال متوازي
+    if (sendingRef.current) return;
+
+    sendingRef.current = true;
+    setIsTyping(true);
 
     setMessages((prev) => [
       ...prev,
@@ -140,7 +167,6 @@ const AIChat: React.FC<AIChatProps> = ({
     ]);
 
     setInput("");
-    setIsTyping(true);
 
     try {
       const reply = await callAura(text);
@@ -167,6 +193,8 @@ const AIChat: React.FC<AIChatProps> = ({
         },
       ]);
     } finally {
+      // 🔓 فكّ القفل دايمًا
+      sendingRef.current = false;
       setIsTyping(false);
     }
   };
@@ -211,10 +239,7 @@ const AIChat: React.FC<AIChatProps> = ({
         </div>
 
         {/* MESSAGES */}
-        <div
-          ref={scrollRef}
-          className="flex-1 overflow-y-auto p-6 space-y-6"
-        >
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6">
           {messages.length === 0 && (
             <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
               <Sparkles size={64} className="text-neon-blue mb-4" />
