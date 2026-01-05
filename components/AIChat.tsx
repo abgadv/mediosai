@@ -58,8 +58,6 @@ const AIChat: React.FC<AIChatProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const processedQueryRef = useRef<string | null>(null);
-
-  // 🔒 LOCK حقيقي يمنع أي تداخل
   const sendingRef = useRef(false);
 
   const todayDate = new Date().toISOString().split("T")[0];
@@ -86,9 +84,10 @@ const AIChat: React.FC<AIChatProps> = ({
   }, [input]);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
   }, [messages, isTyping]);
 
   useEffect(() => {
@@ -108,18 +107,24 @@ const AIChat: React.FC<AIChatProps> = ({
 
   const callAura = async (text: string) => {
     const controller = new AbortController();
-
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, 15000); // 15s hard stop
+    const timeout = setTimeout(() => controller.abort(), 15000);
 
     try {
+      // ✅ تحويل الرسائل لصيغة OpenAI
+      const apiMessages = [
+        ...messages.map((m) => ({
+          role: m.role === "model" ? "assistant" : "user",
+          content: m.text,
+        })),
+        { role: "user", content: text },
+      ];
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
-          messages: [{ role: "user", content: text }],
+          messages: apiMessages,
           meta: {
             doctorStatus,
             moderators,
@@ -140,11 +145,7 @@ const AIChat: React.FC<AIChatProps> = ({
         throw new Error(data.error || "AI request failed");
       }
 
-      return (
-        data.choices?.[0]?.message?.content ||
-        data.text ||
-        "No response"
-      );
+      return data.choices?.[0]?.message?.content || "No response";
     } finally {
       clearTimeout(timeout);
     }
@@ -153,10 +154,7 @@ const AIChat: React.FC<AIChatProps> = ({
   /* ================= SEND ================= */
 
   const handleSend = async (text: string) => {
-    if (!text.trim()) return;
-
-    // 🔒 منع أي إرسال متوازي
-    if (sendingRef.current) return;
+    if (!text.trim() || sendingRef.current) return;
 
     sendingRef.current = true;
     setIsTyping(true);
@@ -193,7 +191,6 @@ const AIChat: React.FC<AIChatProps> = ({
         },
       ]);
     } finally {
-      // 🔓 فكّ القفل دايمًا
       sendingRef.current = false;
       setIsTyping(false);
     }
