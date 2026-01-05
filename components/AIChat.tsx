@@ -145,7 +145,8 @@ const AIChat: React.FC<AIChatProps> = ({
         throw new Error(data.error || "AI request failed");
       }
 
-      return data.choices?.[0]?.message?.content || "No response";
+      return data.text || "No response";
+
     } finally {
       clearTimeout(timeout);
     }
