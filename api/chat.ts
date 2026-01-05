@@ -1,68 +1,47 @@
-export const config = { runtime: "nodejs" };
-
-const AI_TIMEOUT = 12000;
+export const config = {
+  runtime: "nodejs",
+};
 
 export default async function handler(req: Request) {
   if (req.method !== "POST") {
     return new Response(
       JSON.stringify({ error: "Method not allowed" }),
-      { status: 405, headers: { "Content-Type": "application/json" } }
+      { status: 405 }
     );
   }
 
   if (!process.env.AI_API_KEY) {
     return new Response(
-      JSON.stringify({ error: "API key missing" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      JSON.stringify({ error: "Missing API key" }),
+      { status: 500 }
     );
   }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT);
 
   try {
     const body = await req.json();
 
-    const aiRes = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          Authorization: `Bearer ${process.env.AI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4.1-mini",
-          messages: body.messages,
-          temperature: 0.7,
-        }),
-      }
-    );
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.AI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4.1-mini",
+        messages: body.messages,
+        temperature: 0.7,
+      }),
+    });
 
-    const text = await aiRes.text();
+    const data = await res.json();
 
-    let json;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      throw new Error("Invalid AI response");
-    }
-
-    return new Response(JSON.stringify(json), {
+    return new Response(JSON.stringify(data), {
       headers: { "Content-Type": "application/json" },
     });
-  } catch (err: any) {
-    const msg =
-      err.name === "AbortError"
-        ? "AI timeout"
-        : err.message || "AI error";
-
+  } catch (e: any) {
     return new Response(
-      JSON.stringify({ error: msg }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      JSON.stringify({ error: e.message }),
+      { status: 500 }
     );
-  } finally {
-    clearTimeout(timeout);
   }
 }
